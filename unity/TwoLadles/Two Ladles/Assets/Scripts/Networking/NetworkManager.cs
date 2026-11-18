@@ -1059,6 +1059,19 @@ namespace TwoLadles.Networking
                     }
                     break;
 
+                case "TUTORIAL":
+                    // Host moved the new-dish guide to a step (-1 = guide over).
+                    if (!IsHost() && TryDecodeTutorial(msg, out int tDay, out int tStep))
+                    {
+                        ShiftManager.Instance?.ApplyDayGuideStepFromHost(tDay, tStep);
+                    }
+                    break;
+
+                case "TUTORIAL_SKIP":
+                    // Guest pressed Skip on the guide; host ends it for both.
+                    if (IsHost()) ShiftManager.Instance?.SkipDayGuide();
+                    break;
+
                 case "DAY_REPORT":
                     // Host ended the day: show results, earn gold, let the guest shop.
                     if (!IsHost())
@@ -1144,6 +1157,7 @@ namespace TwoLadles.Networking
                             else if (di == "clean_bowl") dChef.carriedItem.vesselType = "bowl";
                         }
                         dChef.RefreshVisuals();
+                        if (dres.ok) ShiftManager.Instance?.NotifyItemProduced(dChef.carriedItem?.itemId);
                     }
                     break;
             }
@@ -1436,6 +1450,14 @@ namespace TwoLadles.Networking
             return true;
         }
 
+        private static int CountFilledSlots(PassCounter pc)
+        {
+            if (pc == null || pc.slots == null) return 0;
+            int n = 0;
+            for (int i = 0; i < pc.slots.Length; i++) if (pc.slots[i] != null && pc.slots[i].item != null) n++;
+            return n;
+        }
+
         public static bool ApplyStationSnapshot(string pkt, Dictionary<string, StationBase> stations, Dictionary<int, Player.PlayerController> chefs)
         {
             if (string.IsNullOrEmpty(pkt) || !pkt.StartsWith("STATIONS|")) return false;
@@ -1451,6 +1473,10 @@ namespace TwoLadles.Networking
                         if (f.Length >= 11 && f[0] == "S" && stations != null)
                         {
                             if (!stations.TryGetValue(f[1], out var st) || st == null) continue;
+                            // Remember old state so the guest can play the same feedback burst the host sees.
+                            int oldCook = st is CookingStation ocs ? (int)ocs.currentState : -1;
+                            int oldParts = st is AssemblyStation oasm ? oasm.placedComponents.Count : -1;
+                            int oldPass = st is PassCounter opc ? CountFilledSlots(opc) : -1;
                             st.heldItem = BuildSyncedItem(f[2], f[3], f[4], f[5]);
 
                             if (st is CookingStation cs)
@@ -1495,6 +1521,19 @@ namespace TwoLadles.Networking
                             else
                             {
                                 try { st.RefreshStationVisuals(); } catch { }
+                            }
+                            if (Application.isPlaying)
+                            {
+                                try
+                                {
+                                    int newCook = st is CookingStation ncs ? (int)ncs.currentState : -1;
+                                    int newParts = st is AssemblyStation nasm ? nasm.placedComponents.Count : -1;
+                                    int newPass = st is PassCounter npc ? CountFilledSlots(npc) : -1;
+                                    TwoLadles.Visuals.FeedbackFX.PlayAt(
+                                        TwoLadles.Visuals.FeedbackFX.FxForStationChange(oldCook, newCook, oldParts, newParts, oldPass, newPass),
+                                        st.transform.position);
+                                }
+                                catch { }
                             }
                             applied = true;
                         }
@@ -1550,6 +1589,18 @@ namespace TwoLadles.Networking
             {
                 SendReliable("STORY_DONE");
             }
+        }
+
+        /// <summary>Host tells the guest which new-dish guide step is showing (-1 = guide over).</summary>
+        public void BroadcastTutorial(int day, int step)
+        {
+            if (IsHost() && partnerEndPoint != null) SendReliable(EncodeTutorial(day, step));
+        }
+
+        /// <summary>Guest asks the host to skip the new-dish guide.</summary>
+        public void SendClientTutorialSkip()
+        {
+            if (!IsHost() && partnerEndPoint != null) SendReliable("TUTORIAL_SKIP");
         }
 
         public void BroadcastShiftStart(int stage, GameMode mode)
@@ -1652,6 +1703,20 @@ namespace TwoLadles.Networking
 
         /// <summary>Lobby-only stand-in chef: lets a player step off Linh/Jiwon, but can never be Ready.</summary>
         public const string PLACEHOLDER_CHAR = "placeholder";
+
+        public static string EncodeTutorial(int day, int step)
+            => $"TUTORIAL|{day.ToString(CultureInfo.InvariantCulture)}|{step.ToString(CultureInfo.InvariantCulture)}";
+
+        public static bool TryDecodeTutorial(string packet, out int day, out int step)
+        {
+            day = 0; step = -1;
+            if (string.IsNullOrEmpty(packet)) return false;
+            var p = packet.Split('|');
+            if (p.Length != 3 || p[0] != "TUTORIAL") return false;
+            if (!int.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out day)) return false;
+            if (!int.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out step)) return false;
+            return step >= -1;
+        }
 
         public static string EncodeDispense(int peer, string station, string item)
             => $"DISPENSE|{peer}|{(station ?? "").Replace("|", "")}|{(item ?? "").Replace("|", "")}";

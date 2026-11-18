@@ -56,11 +56,17 @@ namespace TwoLadles.UI
 
         [Header("Tutorial Guidance")]
         public GameObject tutorialPanelObj;
+        private GameObject dayGuidePanelObj;
+        private Text dayGuideTitleText;
+        private Text dayGuideBodyText;
+        private Text dayGuideTurnText;
         public Text tutorialTitleText;
         public Text tutorialInstructionText;
 
         [Header("Visual Order Queue (Progress Bars)")]
         public Text orderListText;
+        public const float ORDER_CARD_SCALE_MOBILE = 1.6f;
+        public static float OrderCardScale(bool mobile) => mobile ? ORDER_CARD_SCALE_MOBILE : 1.0f;
         private GameObject[] orderCardObjs = new GameObject[4];
         private Image[] orderCardIcons = new Image[4];
         private Text[] orderCardLabels = new Text[4];
@@ -480,6 +486,25 @@ namespace TwoLadles.UI
             tutorialPanelObj.SetActive(false);
 
             // =========================================================================
+            // 2b. NEW-DISH DAY GUIDE CARD (host-driven, mirrored on guest; Skip button)
+            // =========================================================================
+            dayGuidePanelObj = new GameObject("DayGuidePanel", typeof(RectTransform));
+            dayGuidePanelObj.transform.SetParent(root, false);
+            var dgRect = dayGuidePanelObj.GetComponent<RectTransform>();
+            dgRect.anchorMin = new Vector2(0.5f, 1f);
+            dgRect.anchorMax = new Vector2(0.5f, 1f);
+            dgRect.pivot = new Vector2(0.5f, 1f);
+            dgRect.anchoredPosition = new Vector2(0f, -44f);
+            dgRect.sizeDelta = new Vector2(560f, 96f);
+            var dgImg = dayGuidePanelObj.AddComponent<Image>();
+            dgImg.color = new Color(0.10f, 0.07f, 0.16f, 0.95f);
+            dayGuideTitleText = CreateLabel("DayGuideTitle", dayGuidePanelObj.transform, new Vector2(0f, 0.68f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(-40f, -2f), new Vector2(-100f, 0f), "NEW DISH", 14, new Color(1.0f, 0.82f, 0.25f), TextAnchor.MiddleCenter);
+            dayGuideBodyText = CreateLabel("DayGuideBody", dayGuidePanelObj.transform, new Vector2(0f, 0.24f), new Vector2(1f, 0.70f), new Vector2(0.5f, 0.5f), new Vector2(-40f, 0f), new Vector2(-100f, 0f), "", 12, Color.white, TextAnchor.MiddleCenter);
+            dayGuideTurnText = CreateLabel("DayGuideTurn", dayGuidePanelObj.transform, new Vector2(0f, 0f), new Vector2(1f, 0.26f), new Vector2(0.5f, 0f), new Vector2(-40f, 2f), new Vector2(-100f, 0f), "", 11, new Color(0.55f, 0.95f, 1.0f), TextAnchor.MiddleCenter);
+            var skipBtn = CreateButton("DayGuideSkipBtn", dayGuidePanelObj.transform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-8f, 0f), new Vector2(76f, 34f), "Skip", new Color(0.85f, 0.25f, 0.35f, 0.95f), out _, 13);
+            if (skipBtn != null) skipBtn.onClick.AddListener(() => ShiftManager.Instance?.SkipDayGuide());
+            dayGuidePanelObj.SetActive(false);
+            // =========================================================================
             // 3. VISUAL ORDER QUEUE CARDS (Upper Left — Dish Icon + Patience Bar!)
             // =========================================================================
             GameObject ordersPanel = new GameObject("OrdersPanel", typeof(RectTransform));
@@ -490,6 +515,7 @@ namespace TwoLadles.UI
             opRect.pivot = new Vector2(0f, 1f);
             opRect.anchoredPosition = new Vector2(12f, -44f);
             opRect.sizeDelta = new Vector2(210f, 148f);
+            ordersPanel.transform.localScale = Vector3.one * OrderCardScale(Application.isMobilePlatform);
 
             // Hidden fallback text for legacy reference
             orderListText = CreateLabel("OrderListText", ordersPanel.transform, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, "", 1, Color.clear, TextAnchor.UpperLeft);
@@ -1232,6 +1258,7 @@ namespace TwoLadles.UI
                 ShiftManager.Instance.OnFeedbackBanner += ShowFeedback;
                 ShiftManager.Instance.OnShiftEnded += ShowEndShiftModal;
                 ShiftManager.Instance.OnTutorialStepChanged += UpdateTutorialGuidance;
+                ShiftManager.Instance.OnDayGuideChanged += OnDayGuideChanged;
                 ShiftManager.Instance.OnReputationChanged += OnReputationChanged;
                 ShiftManager.Instance.OnWaveUpdated += OnWaveUpdated;
 
@@ -1368,6 +1395,13 @@ namespace TwoLadles.UI
                 {
                     ShiftManager.Instance.isWaitingForRecipeBook = false;
                     ShowFeedback("Recipe Book Closed! Shift Started!", new Color(0.3f, 1.0f, 0.5f));
+                    var sm = ShiftManager.Instance;
+                    if (ShiftManager.DAY_GUIDE_ENABLED && sm.currentMode == GameMode.CAMPAIGN
+                        && !sm.isTutorial && !sm.isNetworkClient && !sm.isAutoplayQAMode
+                        && !sm.HasSeenDayGuide(sm.currentStageId))
+                    {
+                        sm.StartDayGuide(sm.currentStageId);
+                    }
                 }
             }
         }
@@ -1751,6 +1785,39 @@ namespace TwoLadles.UI
             }
         }
 
+        private void OnDayGuideChanged(int day, int step)
+        {
+            if (dayGuidePanelObj == null) return;
+            var sm = ShiftManager.Instance;
+            var gs = sm != null ? sm.CurrentDayGuideStep : null;
+            if (step < 0 || gs == null)
+            {
+                dayGuidePanelObj.SetActive(false);
+                return;
+            }
+            dayGuidePanelObj.SetActive(true);
+            int total = sm.CurrentDayGuideSteps.Count;
+            if (dayGuideTitleText != null)
+                dayGuideTitleText.text = $"DAY {day} NEW DISH  •  {step + 1}/{total}: {gs.titleEN}";
+
+            string lang = LocalizationManager.Instance != null ? LocalizationManager.Instance.CurrentLanguage : LocalizationManager.LANG_EN;
+            string body = lang == LocalizationManager.LANG_VI ? gs.textVI : lang == LocalizationManager.LANG_KO ? gs.textKO : gs.textEN;
+            if (string.IsNullOrEmpty(body)) body = gs.textEN;
+            if (dayGuideBodyText != null) dayGuideBodyText.text = body;
+
+            if (dayGuideTurnText != null)
+            {
+                string localChef = null;
+                var kc = KitchenController.Instance;
+                int localPeer = NetworkManager.Instance != null ? NetworkManager.Instance.localPeerId : 1;
+                if (kc != null && kc.playersByPeer.TryGetValue(localPeer, out var me) && me != null) localChef = me.characterId;
+                string who = gs.chef == "both" ? "BOTH CHEFS" : (gs.chef == "jiwon" ? "JIWON" : "LINH");
+                string turn = gs.chef == "both" || gs.chef == localChef ? "Your turn!" : "Partner's turn - watch!";
+                dayGuideTurnText.text = $"{who}: {turn}";
+            }
+            if (AudioManager.Instance != null) AudioManager.Instance.PlayPickup();
+        }
+
         private void UpdateChefSwitchDisplay(int peerId)
         {
             if (switchChefButtonText != null)
@@ -2049,6 +2116,7 @@ namespace TwoLadles.UI
                 ShiftManager.Instance.OnFeedbackBanner -= ShowFeedback;
                 ShiftManager.Instance.OnShiftEnded -= ShowEndShiftModal;
                 ShiftManager.Instance.OnTutorialStepChanged -= UpdateTutorialGuidance;
+                ShiftManager.Instance.OnDayGuideChanged -= OnDayGuideChanged;
                 ShiftManager.Instance.OnReputationChanged -= OnReputationChanged;
                 ShiftManager.Instance.OnWaveUpdated -= OnWaveUpdated;
             }

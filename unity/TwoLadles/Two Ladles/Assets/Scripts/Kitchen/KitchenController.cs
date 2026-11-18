@@ -24,7 +24,7 @@ namespace TwoLadles.Kitchen
             return objectName == "FrontHeldItemSprite" || objectName == "CarriedItemSprite" || objectName.StartsWith("PassSlotSprite_");
         }
         public const float CAMERA_ORTHO_SIZE = 11.2f;
-        public const float MOBILE_CAMERA_ORTHO_SIZE = 9.6f; // phones: zoom in a bit more
+        public const float MOBILE_CAMERA_ORTHO_SIZE = 7.7f; // phones: ~20% closer (was 9.6)
         public static float CameraOrthoSize(bool mobile) => mobile ? MOBILE_CAMERA_ORTHO_SIZE : CAMERA_ORTHO_SIZE;
 
         // Yard decor on the grass outside the building (kept out of the walkable kitchen/dining box)
@@ -220,7 +220,10 @@ namespace TwoLadles.Kitchen
             {
                 if (st is CookingStation cs)
                 {
+                    var before = cs.currentState;
                     cs.TickCooking(lanClient ? 0f : dt);
+                    if (!lanClient && before == CookingState.COOKING && cs.currentState == CookingState.OPTIMAL)
+                        TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.CookDone, cs.transform.position);
                 }
             }
 
@@ -269,7 +272,17 @@ namespace TwoLadles.Kitchen
 
         private void UpdateTutorialArrow()
         {
-            bool showArrow = ShiftManager.Instance != null && ShiftManager.Instance.shiftActive && ShiftManager.Instance.isTutorial && ShiftManager.Instance.tutorialStep < 10;
+            var sm = ShiftManager.Instance;
+            // Day guide: point at the current step's station (no allocations; dictionary lookup only).
+            StationBase guideStation = null;
+            if (sm != null && sm.shiftActive && sm.isDayGuideActive)
+            {
+                var gStep = sm.CurrentDayGuideStep;
+                if (gStep != null && !string.IsNullOrEmpty(gStep.stationId))
+                    stations.TryGetValue(gStep.stationId, out guideStation);
+            }
+            bool showArrow = guideStation != null
+                || (sm != null && sm.shiftActive && sm.isTutorial && sm.tutorialStep < 10);
             if (!showArrow)
             {
                 if (_tutorialArrowObj != null && _tutorialArrowObj.activeSelf)
@@ -292,9 +305,11 @@ namespace TwoLadles.Kitchen
                 _tutorialArrowObj.SetActive(true);
 
             Vector3 targetPos = new Vector3(-2.0f, 0.0f, 0.0f);
-            int step = ShiftManager.Instance.tutorialStep;
+            int step = guideStation != null ? -1 : ShiftManager.Instance.tutorialStep;
 
-            switch (step)
+            if (guideStation != null)
+                targetPos = guideStation.transform.position;
+            else switch (step)
             {
                 case 1:
                 case 2:

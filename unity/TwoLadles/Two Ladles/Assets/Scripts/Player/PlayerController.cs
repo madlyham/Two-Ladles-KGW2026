@@ -166,6 +166,7 @@ namespace TwoLadles.Player
                     return (true, "");
                 }
                 NetworkManager.Instance.SendClientInteract(false, target.stationId);
+                TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.Pickup, target.transform.position); // instant local "input received"
                 return (true, "");
             }
 
@@ -176,9 +177,20 @@ namespace TwoLadles.Player
             {
                 Color toastCol = res.ok ? new Color(0.35f, 1.0f, 0.6f) : new Color(1.0f, 0.45f, 0.45f);
                 KitchenController.Instance.TriggerStatusToast(res.reason, toastCol);
+                TwoLadles.Visuals.FeedbackFX.PlayForToast(res.reason, res.ok, target.transform.position);
             }
 
+            if (res.ok) NotifyGuide(target);
             return res;
+        }
+
+        /// <summary>Tells the new-dish guide what this chef just made (in hand or on the station).</summary>
+        private void NotifyGuide(StationBase target)
+        {
+            var sm = ShiftManager.Instance;
+            if (sm == null || !sm.isDayGuideActive) return;
+            sm.NotifyItemProduced(carriedItem?.itemId);
+            if (target != null) sm.NotifyItemProduced(target.heldItem?.itemId);
         }
 
         public (bool ok, string reason) TryInteractSecondary(StationBase specificStation = null)
@@ -210,6 +222,7 @@ namespace TwoLadles.Player
                     return (true, "");
                 }
                 NetworkManager.Instance.SendClientInteract(true, target.stationId, target is PrepStation ? Time.time : -1f);
+                TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.Pickup, target.transform.position); // instant local "input received"
                 return (true, "");
             }
 
@@ -220,8 +233,10 @@ namespace TwoLadles.Player
             {
                 Color toastCol = res.ok ? new Color(0.35f, 1.0f, 0.6f) : new Color(1.0f, 0.45f, 0.45f);
                 KitchenController.Instance.TriggerStatusToast(res.reason, toastCol);
+                TwoLadles.Visuals.FeedbackFX.PlayForToast(res.reason, res.ok, target.transform.position);
             }
 
+            if (res.ok) NotifyGuide(target);
             return res;
         }
 
@@ -484,6 +499,7 @@ namespace TwoLadles.Player
                         {
                             otherChef.SetCarriedItem(itemToThrow);
                             KitchenController.Instance.TriggerStatusToast($"Pass Caught by {otherChef.characterId.ToUpper()}!", new Color(0.35f, 1.0f, 0.6f));
+                            TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.Pass, otherChef.transform.position);
                             return true;
                         }
                     }
@@ -495,6 +511,7 @@ namespace TwoLadles.Player
                 {
                     counter.heldItem = itemToThrow;
                     KitchenController.Instance.TriggerStatusToast($"Item Landed on {counter.displayName}!", new Color(0.9f, 0.9f, 0.5f));
+                    TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.Pickup, counter.transform.position);
                     return true;
                 }
 
@@ -506,6 +523,7 @@ namespace TwoLadles.Player
                         {
                             pass.PlaceItem(i, itemToThrow, peerId, Time.time);
                             KitchenController.Instance.TriggerStatusToast("Thrown into Pass Counter slot!", new Color(0.95f, 0.8f, 0.3f));
+                            TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.Pass, pass.transform.position);
                             return true;
                         }
                     }
@@ -518,6 +536,7 @@ namespace TwoLadles.Player
                 }
 
                 KitchenController.Instance.TriggerStatusToast("Nowhere to land!", new Color(1.0f, 0.55f, 0.4f));
+                TwoLadles.Visuals.FeedbackFX.PlayAt(TwoLadles.Visuals.FxType.Error, transform.position);
             }
 
             // Nothing caught it: item stays in hands instead of vanishing.
@@ -646,7 +665,7 @@ namespace TwoLadles.Player
                 case "noodles_raw": case "noodles_blanched": case "pho_bo": return "tteokbokki";
                 case "broth_hot": return "gochujang";
                 case "clean_plate": case "dish_plate": case "clean_bowl": case "dish_bowl": return "dish_bowl";
-                case "burnt_waste": return "beef_raw";
+                case "burnt_waste": return "burnt_waste";
                 default: return itemId;
             }
         }

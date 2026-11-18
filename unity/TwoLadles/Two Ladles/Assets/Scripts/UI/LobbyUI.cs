@@ -179,6 +179,38 @@ namespace TwoLadles.UI
             return btn;
         }
 
+        /// <summary>Adds a small chef face at the left of a button and shifts its label right so they don't overlap.</summary>
+        private Image AddFaceIcon(Button btn, Text label)
+        {
+            GameObject faceObj = new GameObject("Face", typeof(RectTransform));
+            faceObj.transform.SetParent(btn.transform, false);
+            var fRect = faceObj.GetComponent<RectTransform>();
+            fRect.anchorMin = new Vector2(0f, 0.5f);
+            fRect.anchorMax = new Vector2(0f, 0.5f);
+            fRect.pivot = new Vector2(0f, 0.5f);
+            fRect.anchoredPosition = new Vector2(3f, 0f);
+            fRect.sizeDelta = new Vector2(30f, 30f);
+
+            var face = faceObj.AddComponent<Image>();
+            face.preserveAspect = true;
+            face.raycastTarget = false;
+            face.enabled = false;
+
+            if (label != null)
+            {
+                var tRect = label.rectTransform;
+                tRect.offsetMin = new Vector2(34f, tRect.offsetMin.y);
+            }
+            return face;
+        }
+
+        private static void SetFace(Image face, string chefId)
+        {
+            if (face == null) return;
+            face.sprite = ChefPortraits.Get(chefId);
+            face.enabled = face.sprite != null;
+        }
+
         private InputField CreateInputField(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 anchoredPos, Vector2 sizeDelta, string defaultText, string placeholderText)
         {
             GameObject go = new GameObject(name, typeof(RectTransform));
@@ -424,7 +456,8 @@ namespace TwoLadles.UI
             endlessModeButton.onClick.AddListener(OnSelectEndlessClicked);
 
             // Chef switch: Linh -> Jiwon -> placeholder (???) -> Linh. Placeholder can never Ready.
-            chefCycleButton = CreateButton("ChefCycleBtn", roomPanel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-250f, -210f), new Vector2(160f, 34f), "CHEF: LINH", new Color(0.22f, 0.5f, 0.45f, 1f), out chefCycleText, 11);
+            chefCycleButton = CreateButton("ChefCycleBtn", roomPanel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-265f, -210f), new Vector2(190f, 34f), "CHEF: LINH", new Color(0.22f, 0.5f, 0.45f, 1f), out chefCycleText, 11);
+            chefCycleFace = AddFaceIcon(chefCycleButton, chefCycleText);
             chefCycleButton.onClick.AddListener(OnChefCycleClicked);
 
             // Room Action Row: Ready, Start Level, Leave
@@ -472,7 +505,8 @@ namespace TwoLadles.UI
             modeToggleButton = CreateButton("ModeToggleBtn", settingsPopupPanel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-95f, -225f), new Vector2(170f, 34f), "MODE: LAN CO-OP", new Color(0.18f, 0.35f, 0.55f, 0.95f), out modeToggleText, 11);
             modeToggleButton.onClick.AddListener(OnToggleModeClicked);
 
-            chefSelectButton = CreateButton("ChefSelectBtn", settingsPopupPanel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(95f, -225f), new Vector2(180f, 34f), "YOU: LINH (AI: JIWON)", new Color(0.24f, 0.28f, 0.38f, 0.95f), out chefSelectText, 11);
+            chefSelectButton = CreateButton("ChefSelectBtn", settingsPopupPanel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(110f, -225f), new Vector2(210f, 34f), "YOU: LINH (AI: JIWON)", new Color(0.24f, 0.28f, 0.38f, 0.95f), out chefSelectText, 11);
+            chefSelectFace = AddFaceIcon(chefSelectButton, chefSelectText);
             chefSelectButton.onClick.AddListener(OnToggleChefSelectClicked);
             chefSelectButton.gameObject.SetActive(isSoloMode);
 
@@ -494,6 +528,10 @@ namespace TwoLadles.UI
 
             qaUpgradesButton = CreateButton("QAUpgradesBtn", settingsPopupPanel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(110f, -370f), new Vector2(200f, 32f), QAUpgradesLabel(), new Color(0.15f, 0.18f, 0.24f, 0.9f), out qaUpgradesText, 11);
             qaUpgradesButton.onClick.AddListener(() => { qaAllUpgrades = !qaAllUpgrades; qaUpgradesText.text = QAUpgradesLabel(); });
+
+            // Test cheat: unlock all campaign days (same as typing UNLOCK in the menu). Button for phones.
+            var unlockAllBtn = CreateButton("UnlockAllStagesBtn", settingsPopupPanel.transform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-20f, 35f), new Vector2(210f, 36f), "UNLOCK ALL DAYS (TEST)", new Color(0.55f, 0.32f, 0.12f, 0.9f), out _, 11);
+            unlockAllBtn.onClick.AddListener(OnUnlockCheat);
 
             var closeSettingsBtn = CreateButton("CloseSettingsBtn", settingsPopupPanel.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 35f), new Vector2(150f, 36f), "CLOSE", new Color(0.25f, 0.28f, 0.36f, 1f), out var closeSettingsT, 12); Reg(closeSettingsT, "menu.close");
             closeSettingsBtn.onClick.AddListener(ShowMainMenu);
@@ -647,6 +685,25 @@ namespace TwoLadles.UI
             {
                 ToggleMenuVisibility();
             }
+
+            // Test cheat: type UNLOCK anywhere in the menu.
+            string typed = Input.inputString;
+            for (int i = 0; i < typed.Length; i++)
+            {
+                if (unlockCheat.Feed(typed[i])) OnUnlockCheat();
+            }
+        }
+
+        private readonly CheatCode unlockCheat = new CheatCode("UNLOCK");
+
+        private void OnUnlockCheat()
+        {
+            var pm = ProgressionManager.Instance;
+            if (pm == null) return;
+            pm.CheatUnlockAllStages();
+            RefreshProgressionDisplay();
+            UpdateStatus($"TEST CHEAT: all {ProgressionManager.CAMPAIGN_STAGES} days unlocked.", false);
+            AudioManager.Instance?.PlayPickup();
         }
 
         // Static labels that only need a translation lookup when the language changes.
@@ -857,6 +914,8 @@ namespace TwoLadles.UI
         }
 
         private Button chefCycleButton;
+        private Image chefCycleFace;
+        private Image chefSelectFace;
         private Text chefCycleText;
 
         /// <summary>Cycles local chef Linh -> Jiwon -> placeholder, skipping a chef the partner already holds.</summary>
@@ -1046,6 +1105,7 @@ namespace TwoLadles.UI
                     string name = ChefDisplayName(localP.character);
                     chefCycleText.text = lm != null ? lm.Format("menu.chef_cycle", name) : $"CHEF: {name}";
                 }
+                SetFace(chefCycleFace, localP.character);
             }
 
             var nm = NetworkManager.Instance;
@@ -1135,6 +1195,7 @@ namespace TwoLadles.UI
             {
                 chefSelectText.text = (humanChefPeerId == 1) ? lm.Get("menu.human_linh") : lm.Get("menu.human_jiwon");
             }
+            SetFace(chefSelectFace, humanChefPeerId == 1 ? "linh" : "jiwon");
 
             foreach (var e in staticLocTexts)
             {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using TwoLadles.Data;
 using TwoLadles.Kitchen;
+using TwoLadles.Story;
 
 namespace TwoLadles.Core
 {
@@ -198,6 +199,115 @@ namespace TwoLadles.Core
         public event Action<float, float> OnReputationChanged;
         public event Action<int, int, int, int> OnWaveUpdated;
 
+        // ── New-dish Day Guide (host-authoritative, mirrored to guest via TUTORIAL packets) ──
+        public const bool DAY_GUIDE_ENABLED = true;
+        /// <summary>(day, step). step == -1 means the guide closed.</summary>
+        public event Action<int, int> OnDayGuideChanged;
+        public bool isDayGuideActive = false;
+        public int dayGuideStep = -1;
+        public int dayGuideDay = 0;
+        private float dayGuideStepTimer = 0f;
+        private List<DayGuideStep> dayGuideSteps = new List<DayGuideStep>();
+
+        public List<DayGuideStep> CurrentDayGuideSteps => dayGuideSteps;
+
+        public DayGuideStep CurrentDayGuideStep =>
+            (isDayGuideActive && dayGuideStep >= 0 && dayGuideStep < dayGuideSteps.Count) ? dayGuideSteps[dayGuideStep] : null;
+
+        public bool HasSeenDayGuide(int day)
+        {
+            var pm = ProgressionManager.Instance;
+            return pm != null && pm.dayGuidesSeen != null && pm.dayGuidesSeen.Contains(day);
+        }
+
+        /// <summary>Host / Solo only. Opens the guide for a day; the guest gets it via broadcast.</summary>
+        public void StartDayGuide(int day)
+        {
+            if (isNetworkClient) return;
+            var steps = DayGuideScript.GetSteps(day);
+            if (steps.Count == 0) return;
+            dayGuideSteps = steps;
+            dayGuideDay = day;
+            dayGuideStep = 0;
+            dayGuideStepTimer = 0f;
+            isDayGuideActive = true;
+            PublishDayGuide();
+        }
+
+        /// <summary>Called whenever an item is made / picked / served. Host decides advancement.</summary>
+        public void NotifyItemProduced(string itemId)
+        {
+            if (!isDayGuideActive || isNetworkClient || string.IsNullOrEmpty(itemId)) return;
+            var step = CurrentDayGuideStep;
+            if (step == null) return;
+            if (step.completionItemId == itemId) AdvanceDayGuide();
+        }
+
+        private void AdvanceDayGuide()
+        {
+            if (!isDayGuideActive) return;
+            dayGuideStep++;
+            dayGuideStepTimer = 0f;
+            if (dayGuideStep >= dayGuideSteps.Count)
+            {
+                EndDayGuide();
+                return;
+            }
+            PublishDayGuide();
+        }
+
+        private void EndDayGuide()
+        {
+            int day = dayGuideDay;
+            isDayGuideActive = false;
+            dayGuideStep = -1;
+            dayGuideStepTimer = 0f;
+            var pm = ProgressionManager.Instance;
+            if (pm != null && pm.dayGuidesSeen != null && !pm.dayGuidesSeen.Contains(day))
+            {
+                pm.dayGuidesSeen.Add(day);
+                pm.SaveProgression();
+            }
+            PublishDayGuide();
+        }
+
+        /// <summary>Skip button. Guest forwards the request to the host.</summary>
+        public void SkipDayGuide()
+        {
+            if (isNetworkClient)
+            {
+                TwoLadles.Networking.NetworkManager.Instance?.SendClientTutorialSkip();
+                return;
+            }
+            if (!isDayGuideActive) return;
+            EndDayGuide();
+        }
+
+        /// <summary>Guest: mirror host guide state. step == -1 closes the guide.</summary>
+        public void ApplyDayGuideStepFromHost(int day, int step)
+        {
+            if (step < 0)
+            {
+                isDayGuideActive = false;
+                dayGuideStep = -1;
+                dayGuideDay = day;
+                OnDayGuideChanged?.Invoke(day, -1);
+                return;
+            }
+            if (dayGuideDay != day || dayGuideSteps.Count == 0) dayGuideSteps = DayGuideScript.GetSteps(day);
+            if (step >= dayGuideSteps.Count) return;
+            dayGuideDay = day;
+            dayGuideStep = step;
+            isDayGuideActive = true;
+            OnDayGuideChanged?.Invoke(day, step);
+        }
+
+        private void PublishDayGuide()
+        {
+            OnDayGuideChanged?.Invoke(dayGuideDay, dayGuideStep);
+            if (!isNetworkClient) TwoLadles.Networking.NetworkManager.Instance?.BroadcastTutorial(dayGuideDay, dayGuideStep);
+        }
+
         public bool shiftActive = false;
         public GameMode currentMode = GameMode.CAMPAIGN;
         public int currentStageId = 1;
@@ -294,6 +404,17 @@ namespace TwoLadles.Core
         public void TickShift(float dt)
         {
             if (!shiftActive || isWaitingForRecipeBook) return;
+
+            // New-dish guide: order timers and spawning are frozen until it ends.
+            if (isDayGuideActive)
+            {
+                if (!isNetworkClient && isSoloMode)
+                {
+                    dayGuideStepTimer += dt;
+                    if (dayGuideStepTimer >= DayGuideScript.BOT_STEP_TIMEOUT) AdvanceDayGuide();
+                }
+                return;
+            }
 
             shiftElapsedSeconds += dt;
 
@@ -539,6 +660,11 @@ namespace TwoLadles.Core
             wavesClearedCount = 0;
             isWaveTransitioning = false;
             waveTransitionTimer = 0.0f;
+
+            isDayGuideActive = false;
+            dayGuideStep = -1;
+            dayGuideDay = 0;
+            dayGuideStepTimer = 0f;
 
             float duration = DEFAULT_SHIFT_DURATION;
             if (isTutorial)
@@ -798,6 +924,8 @@ namespace TwoLadles.Core
                             AdvanceTutorialStep(10);
                         }
 
+                        NotifyItemProduced("serve");
+
                         OnOrderQueueUpdated?.Invoke(activeOrders);
                         OnFeedbackBanner?.Invoke($"Order Complete! +{finalScore} pts", new Color(0.2f, 1.0f, 0.4f));
                         CheckWaveProgression();
@@ -923,6 +1051,9 @@ namespace TwoLadles.Core
                 patience += GetRecipePatienceBonus(item);
             }
 
+            // Longer timers for everyone (same on PC and phone: crossplay-safe, host decides)
+            if (!isTutorial) patience = ApplyPatience(patience);
+
             ticketCounter++;
             waveOrdersSpawned++;
             var ticket = new OrderTicket($"ticket_{ticketCounter}", selectedItems, vessel, patience);
@@ -931,6 +1062,10 @@ namespace TwoLadles.Core
             OnOrderQueueUpdated?.Invoke(activeOrders);
             OnWaveUpdated?.Invoke(currentWaveNumber, totalWaves, waveOrdersCompleted, waveOrdersRequired);
         }
+
+        /// <summary>Global order-timer stretch. Applied host-side only, so PC and phone always match.</summary>
+        public const float PATIENCE_MULTIPLIER = 1.5f;
+        public static float ApplyPatience(float seconds) => seconds * PATIENCE_MULTIPLIER;
 
         /// <summary>Extra customer patience (seconds) for recipes with more steps.</summary>
         public static float GetRecipePatienceBonus(string recipeId)

@@ -389,6 +389,7 @@ namespace TwoLadles.UI
 
             localChef.carriedItem = new KitchenItem(itemId, dName, vesselType, QualityTier.STANDARD);
             localChef.RefreshVisuals();
+            ShiftManager.Instance?.NotifyItemProduced(itemId);
 
             if (ShiftManager.Instance != null && ShiftManager.Instance.isTutorial)
             {

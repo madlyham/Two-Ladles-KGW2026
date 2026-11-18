@@ -44,6 +44,7 @@ namespace TwoLadles.Core
         public List<string> purchasedUpgrades = new List<string>();
         public List<int> stageKeys = new List<int>();
         public List<StageRecord> stageValues = new List<StageRecord>();
+        public List<int> dayGuidesSeen = new List<int>();
     }
 
     public class ProgressionManager : MonoBehaviour
@@ -71,6 +72,9 @@ namespace TwoLadles.Core
         public int endlessBestScore = 0;
         public int endlessBestOrders = 0;
         public float endlessBestDuration = 0.0f;
+
+        /// <summary>Campaign days whose new-dish guide was finished or skipped.</summary>
+        public List<int> dayGuidesSeen = new List<int>();
 
         public Dictionary<int, StageRecord> stageRecords = new Dictionary<int, StageRecord>();
         public Dictionary<string, UpgradeItem> catalogUpgrades = new Dictionary<string, UpgradeItem>();
@@ -262,7 +266,7 @@ namespace TwoLadles.Core
             rec.completed = true;
 
             bool newlyUnlocked = false;
-            if (stageId >= 1 && stageId == highestUnlockedStage && highestUnlockedStage < 5)
+            if (stageId >= 1 && stageId == highestUnlockedStage && highestUnlockedStage < CAMPAIGN_STAGES)
             {
                 highestUnlockedStage = stageId + 1;
                 newlyUnlocked = true;
@@ -478,6 +482,8 @@ namespace TwoLadles.Core
                         data.purchasedUpgrades.Add(kvp.Key);
                 }
 
+                data.dayGuidesSeen.AddRange(dayGuidesSeen);
+
                 foreach (var kvp in stageRecords)
                 {
                     data.stageKeys.Add(kvp.Key);
@@ -553,6 +559,8 @@ namespace TwoLadles.Core
                 endlessBestScore = data.endlessBestScore;
                 endlessBestOrders = data.endlessBestOrders;
                 endlessBestDuration = data.endlessBestDuration;
+                dayGuidesSeen.Clear();
+                if (data.dayGuidesSeen != null) dayGuidesSeen.AddRange(data.dayGuidesSeen);
 
                 foreach (var up in catalogUpgrades.Values)
                 {
@@ -602,6 +610,7 @@ namespace TwoLadles.Core
             endlessBestOrders = 0;
             endlessBestDuration = 0.0f;
             claimedRewardTokens.Clear();
+            dayGuidesSeen.Clear();
 
             foreach (var k in new List<int>(stageRecords.Keys))
             {
@@ -683,6 +692,19 @@ namespace TwoLadles.Core
             qaRewardSnapshot = null;
 
             UpdateLiveChefsTiers();
+            OnProgressionUpdated?.Invoke();
+        }
+
+        /// <summary>Number of campaign days (stages). Single source of truth for the unlock cap.</summary>
+        public const int CAMPAIGN_STAGES = 5;
+
+        /// <summary>Test cheat: opens every campaign stage. Does not change tiers, coins or stars.</summary>
+        public void CheatUnlockAllStages()
+        {
+            if (highestUnlockedStage >= CAMPAIGN_STAGES) { OnProgressionUpdated?.Invoke(); return; }
+            highestUnlockedStage = CAMPAIGN_STAGES;
+            OnStageUnlocked?.Invoke(highestUnlockedStage);
+            SaveProgression();
             OnProgressionUpdated?.Invoke();
         }
     }

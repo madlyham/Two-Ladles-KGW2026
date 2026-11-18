@@ -389,18 +389,8 @@ namespace TwoLadles.UI
             a.Apply();
             sendSprite = Sprite.Create(a, new Rect(0, 0, 9, 8), new Vector2(0.5f, 0.5f), 100f);
 
-            jiwonHead = HeadCrop(Resources.Load<Sprite>("Sprites/Characters/jiwon_tier1"));
-            linhHead = HeadCrop(Resources.Load<Sprite>("Sprites/Characters/linh_tier1"));
-        }
-
-        // Top square of a full-body sprite = head and shoulders.
-        private static Sprite HeadCrop(Sprite full)
-        {
-            if (full == null) return null;
-            Rect r = full.rect;
-            float side = Mathf.Min(r.width, r.height);
-            var crop = new Rect(r.x, r.y + r.height - side, side, side);
-            return Sprite.Create(full.texture, crop, new Vector2(0.5f, 0.5f), full.pixelsPerUnit);
+            jiwonHead = ChefPortraits.Get("jiwon");
+            linhHead = ChefPortraits.Get("linh");
         }
 
         // ---------------------------------------------------------------- UI building

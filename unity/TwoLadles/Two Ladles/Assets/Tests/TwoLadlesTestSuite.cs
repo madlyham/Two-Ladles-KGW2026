@@ -9,6 +9,7 @@ using TwoLadles.Player;
 using TwoLadles.Networking;
 using TwoLadles.AI;
 using TwoLadles.UI;
+using TwoLadles.Visuals;
 
 namespace TwoLadles.Tests
 {
@@ -102,6 +103,11 @@ namespace TwoLadles.Tests
             Test23_LanReliability();
             Test24_BotIngredientSourcing();
             Test25_BotUnstickTrashRule();
+            Test26_FeedbackFX();
+            Test27_DayGuide();
+            Test28_MobilePlayability();
+            Test29_ChefPortraits();
+            Test30_FxVisibilityAndCheat();
 
             Debug.Log("------------------------------------------------------------");
             Debug.Log($"  RESULTS: {testsPassed} / {testsRun} Passed | {testsFailed} Failed");
@@ -1661,6 +1667,8 @@ namespace TwoLadles.Tests
             // Item sprites: burnt food and plates no longer look like real ingredients
             Assert(PlayerController.ResolveItemSpriteName("burnt_waste") != "gochujang", "Burnt waste no longer looks like gochujang");
             Assert(PlayerController.ResolveItemSpriteName("clean_plate") != "cooked_rice", "Plates no longer look like cooked rice");
+            Assert(PlayerController.ResolveItemSpriteName("burnt_waste") == "burnt_waste", "Burnt waste uses its own burnt plate sprite");
+            Assert(Resources.Load<Texture2D>("Sprites/Items/burnt_waste") != null, "Burnt plate sprite file exists in Resources");
 
             // Day 5 waves 2 and 3 can actually start
             Assert(ShiftManager.Day5WaveOrders != null && ShiftManager.Day5WaveOrders.Length == 3, "Day 5 has three wave order targets");
@@ -1941,6 +1949,268 @@ namespace TwoLadles.Tests
             Vector3 eastPass = AI.KitchenNavGraph.GetPassApproach(2);
             Assert(westPass.x < 0f && Mathf.Abs(westPass.x) < 1.4f && Mathf.Abs(westPass.x) >= 1.25f, "Linh stands closer to the pass counter without clipping it");
             Assert(eastPass.x > 0f && Mathf.Abs(eastPass.x) < 1.4f && Mathf.Abs(eastPass.x) >= 1.25f, "Jiwon stands closer to the pass counter without clipping it");
+        }
+
+        // ------------------------------------------------------------------
+        // TEST 26: Feedback FX — toast/state-change mapping, colours, bounded pool
+        // ------------------------------------------------------------------
+        private void Test26_FeedbackFX()
+        {
+            Debug.Log("\n[TEST 26] Feedback FX — Combine/Cook/Serve/Pass/Error Bursts");
+
+            // 1. Toast text -> effect type (host + solo path)
+            Assert(FeedbackFX.FxForToast("Dish Served! +50 points.", true) == FxType.Serve, "Serve toast plays green serve burst");
+            Assert(FeedbackFX.FxForToast("Added Rice to Plate.", true) == FxType.Combine, "Adding to vessel plays combine burst");
+            Assert(FeedbackFX.FxForToast("Assembled Tteokbokki!", true) == FxType.Combine, "Assembled toast plays combine burst");
+            Assert(FeedbackFX.FxForToast("Completed dish: Pho Bo!", true) == FxType.Combine, "Completed dish plays combine burst");
+            Assert(FeedbackFX.FxForToast("Passed!", true) == FxType.Pass, "Pass toast plays pass burst");
+            Assert(FeedbackFX.FxForToast("Pass Caught by LINH!", true) == FxType.Pass, "Caught throw plays pass burst");
+            Assert(FeedbackFX.FxForToast("Thrown into Pass Counter slot!", true) == FxType.Pass, "Throw into pass plays pass burst");
+            Assert(FeedbackFX.FxForToast("Grabbed Egg from crate.", true) == FxType.Pickup, "Grab plays small pickup puff");
+            Assert(FeedbackFX.FxForToast("Dish Served! +50 points.", false) == FxType.Error, "Any failed action plays red error burst");
+            Assert(FeedbackFX.FxForToast("Wrong vessel.", false) == FxType.Error, "Rejected action plays red error burst");
+            Assert(FeedbackFX.FxForToast("", true) == FxType.None, "Empty toast plays nothing");
+            Assert(FeedbackFX.FxForToast(null, false) == FxType.None, "Null toast plays nothing");
+
+            // 2. Station snapshot diff -> effect type (LAN guest path, pure function)
+            int cooking = (int)CookingState.COOKING, optimal = (int)CookingState.OPTIMAL;
+            Assert(FeedbackFX.FxForStationChange(cooking, optimal, -1, -1, -1, -1) == FxType.CookDone, "Cooking -> optimal plays cook-done steam");
+            Assert(FeedbackFX.FxForStationChange(optimal, optimal, -1, -1, -1, -1) == FxType.None, "No state change plays nothing");
+            Assert(FeedbackFX.FxForStationChange(-1, -1, 1, 2, -1, -1) == FxType.Combine, "Assembly gaining a part plays combine burst");
+            Assert(FeedbackFX.FxForStationChange(-1, -1, 2, 0, -1, -1) == FxType.None, "Assembly clearing plays nothing");
+            Assert(FeedbackFX.FxForStationChange(-1, -1, -1, -1, 0, 1) == FxType.Pass, "Pass slot filling plays pass burst");
+            Assert(FeedbackFX.FxForStationChange(-1, -1, -1, -1, 1, 0) == FxType.None, "Pass slot emptying plays nothing");
+
+            // 3. Colours match the agreed palette
+            Color serve = FeedbackFX.ColorFor(FxType.Serve), err = FeedbackFX.ColorFor(FxType.Error), comb = FeedbackFX.ColorFor(FxType.Combine), pass = FeedbackFX.ColorFor(FxType.Pass);
+            Assert(serve.g > serve.r && serve.g > serve.b, "Serve burst is green");
+            Assert(err.r > err.g && err.r > err.b, "Error burst is red");
+            Assert(comb.r > 0.8f && comb.g > 0.6f && comb.b < 0.5f, "Combine burst is gold");
+            Assert(pass.b > pass.r, "Pass burst is blue");
+            Assert(FeedbackFX.MAX_PARTICLES_PER_BURST <= 12, "Bursts stay small (<= 12 particles)");
+
+            // 4. Pool is bounded: 100 plays never create more than POOL_SIZE systems
+            var fx = FeedbackFX.EnsureInstance();
+            Assert(fx != null, "FeedbackFX bootstraps on demand");
+            for (int i = 0; i < 100; i++) fx.Play(FxType.Serve, new Vector3(i % 5, 0f, 0f));
+            Assert(fx.PoolCount == FeedbackFX.POOL_SIZE && FeedbackFX.POOL_SIZE == 24, "Effect pool stays at 24 systems after 100 plays");
+            fx.Play(FxType.None, Vector3.zero);
+            Assert(fx.PoolCount == FeedbackFX.POOL_SIZE, "Playing None is a safe no-op");
+        }
+
+        // ------------------------------------------------------------
+        // TEST 27: New-Dish Day Guide (steps, pause, skip, LAN packets)
+        // ------------------------------------------------------------
+        private void Test27_DayGuide()
+        {
+            Debug.Log("\n[TEST 27] New-Dish Day Guide...");
+            var knownStations = new HashSet<string> {
+                "pass_counter", "trash_bin", "serving_station",
+                "prep_west", "counter_west", "counter_west_2", "counter_west_3", "stockpot", "noodle_blancher", "fridge_west", "shelf_west",
+                "counter_east", "prep_east", "counter_east_2", "grill_pan", "simmer_wok", "fridge_east", "shelf_east" };
+
+            // 1. Script data: every campaign day has a real guide
+            for (int day = 1; day <= 5; day++)
+            {
+                var steps = TwoLadles.Story.DayGuideScript.GetSteps(day);
+                Assert(steps != null && steps.Count >= 3, $"Day {day} guide has at least 3 steps");
+                if (steps == null) continue;
+                bool allValid = true;
+                foreach (var st in steps)
+                {
+                    if (!string.IsNullOrEmpty(st.stationId) && !knownStations.Contains(st.stationId)) allValid = false;
+                    if (st.completionItemId != "serve" && !GameData.Instance.ingredients.ContainsKey(st.completionItemId ?? "")) allValid = false;
+                    if (string.IsNullOrEmpty(st.textEN)) allValid = false;
+                }
+                Assert(allValid, $"Day {day} guide steps use real stations, real items and have text");
+                Assert(steps[steps.Count - 1].completionItemId == "serve", $"Day {day} guide ends with serving the dish");
+            }
+            Assert(TwoLadles.Story.DayGuideScript.GetSteps(0).Count == 0 && TwoLadles.Story.DayGuideScript.GetSteps(99).Count == 0, "Days without a guide return an empty list");
+            Assert(TwoLadles.Story.DayGuideScript.BOT_STEP_TIMEOUT == 45f, "Solo guide step auto-advances after 45s");
+
+            // 2. LAN packet round-trip
+            string pkt = NetworkManager.EncodeTutorial(2, 1);
+            Assert(NetworkManager.TryDecodeTutorial(pkt, out int dDay, out int dStep) && dDay == 2 && dStep == 1, "TUTORIAL packet round-trips day + step");
+            Assert(NetworkManager.TryDecodeTutorial(NetworkManager.EncodeTutorial(3, -1), out _, out int endStep) && endStep == -1, "TUTORIAL packet carries guide end (-1)");
+            Assert(!NetworkManager.TryDecodeTutorial("TUTORIAL|x|y", out _, out _), "Garbage TUTORIAL packet rejected");
+            Assert(!NetworkManager.TryDecodeTutorial("DISPENSE|2|1", out _, out _), "Wrong packet prefix rejected");
+            Assert(!NetworkManager.TryDecodeTutorial(null, out _, out _), "Null packet rejected");
+
+            // 3. Host flow: guide pauses orders, advances on produced items, skip resumes play
+            var sm = ShiftManager.Instance;
+            var pm = ProgressionManager.Instance;
+            pm.ResetProgressionForTesting();
+            sm.StartShift(1, GameMode.CAMPAIGN);
+            sm.isNetworkClient = false;
+            sm.isSoloMode = false;
+            Assert(!pm.dayGuidesSeen.Contains(1) && !sm.HasSeenDayGuide(1), "Day 1 guide not seen after reset");
+            sm.StartDayGuide(1);
+            Assert(sm.isDayGuideActive && sm.dayGuideStep == 0 && sm.dayGuideDay == 1, "StartDayGuide activates step 0 of day 1");
+
+            sm.activeOrders.Clear();
+            sm.activeOrders.Add(new OrderTicket("g1", "tteokbokki", "bowl", 60f));
+            sm.TickShift(5f);
+            Assert(sm.activeOrders.Count == 1, "No new orders spawn while guide is active");
+            Assert(sm.activeOrders.Count == 1 && Mathf.Approximately(sm.activeOrders[0].timeRemaining, 60f), "Order timers frozen while guide is active");
+
+            var day1 = TwoLadles.Story.DayGuideScript.GetSteps(1);
+            sm.NotifyItemProduced("not_a_real_item");
+            Assert(sm.dayGuideStep == 0, "Unrelated item does not advance guide");
+            sm.NotifyItemProduced(day1[0].completionItemId);
+            Assert(sm.dayGuideStep == 1, "Producing step item advances guide to step 1");
+
+            sm.isNetworkClient = true;
+            sm.NotifyItemProduced(day1[1].completionItemId);
+            Assert(sm.dayGuideStep == 1, "LAN guest cannot advance guide locally (host authoritative)");
+            sm.ApplyDayGuideStepFromHost(1, 2);
+            Assert(sm.isDayGuideActive && sm.dayGuideStep == 2, "Guest applies guide step from host packet");
+            sm.isNetworkClient = false;
+
+            sm.SkipDayGuide();
+            Assert(!sm.isDayGuideActive && sm.dayGuideStep == -1, "Skip ends the guide");
+            Assert(pm.dayGuidesSeen.Contains(1) && sm.HasSeenDayGuide(1), "Skipped day is marked as seen");
+            sm.activeOrders.Clear();
+            sm.TickShift(2f);
+            Assert(sm.activeOrders.Count >= 1, "Orders spawn again after the guide ends");
+
+            // 4. Solo: bot-driven step auto-advances after timeout
+            sm.isSoloMode = true;
+            sm.StartShift(2, GameMode.CAMPAIGN);
+            sm.isSoloMode = true;
+            sm.StartDayGuide(2);
+            int before = sm.dayGuideStep;
+            sm.TickShift(46f);
+            Assert(sm.isDayGuideActive && sm.dayGuideStep == before + 1, "Solo guide step auto-advances after 45s timeout");
+
+            // 5. Finishing all steps ends guide and marks seen
+            var day2 = TwoLadles.Story.DayGuideScript.GetSteps(2);
+            for (int i = sm.dayGuideStep; i < day2.Count; i++) sm.NotifyItemProduced(day2[i].completionItemId);
+            Assert(!sm.isDayGuideActive && pm.dayGuidesSeen.Contains(2), "Completing every step ends guide and marks day seen");
+
+            // 6. LAN guest cannot start the guide itself
+            sm.isSoloMode = false;
+            sm.isNetworkClient = true;
+            sm.StartDayGuide(3);
+            Assert(!sm.isDayGuideActive, "LAN guest cannot start guide (host starts it)");
+
+            sm.isNetworkClient = false;
+            sm.isSoloMode = false;
+            sm.shiftActive = false;
+            pm.ResetProgressionForTesting();
+        }
+
+        private void Test28_MobilePlayability()
+        {
+            Debug.Log("\n[TEST 28] Mobile Playability — Camera Zoom, Bigger Order Cards, Longer Timers");
+
+            // 1. Phone camera ~20% closer than before (9.6 -> ~7.7), desktop unchanged
+            Assert(KitchenController.CameraOrthoSize(true) <= 7.8f, "Mobile camera zoomed in ~20% (ortho <= 7.8)");
+            Assert(KitchenController.CameraOrthoSize(true) < KitchenController.CameraOrthoSize(false), "Mobile camera still closer than desktop");
+            Assert(KitchenController.CameraOrthoSize(false) == 11.2f, "Desktop camera unchanged");
+
+            // 2. Order cards bigger on phones only
+            Assert(KitchenHUD.OrderCardScale(true) >= 1.5f, "Mobile order cards scaled up (>= 1.5x)");
+            Assert(KitchenHUD.OrderCardScale(false) == 1.0f, "Desktop order cards unchanged");
+
+            // 3. Longer order timers, SAME on every device (crossplay)
+            Assert(ShiftManager.PATIENCE_MULTIPLIER == 1.5f, "Patience multiplier is 1.5x");
+            Assert(Mathf.Approximately(ShiftManager.ApplyPatience(60f), 90f), "ApplyPatience(60) == 90");
+            Assert(Mathf.Approximately(ShiftManager.ApplyPatience(0f), 0f), "ApplyPatience(0) == 0");
+
+            // 4. Spawned campaign order uses the longer timer (host-side, sent to guest as-is)
+            var sm = ShiftManager.Instance;
+            sm.isNetworkClient = false;
+            sm.isSoloMode = false;
+            sm.StartShift(1, GameMode.CAMPAIGN);
+            Assert(!sm.isTutorial, "Campaign shift is not tutorial");
+            sm.activeOrders.Clear();
+            float wavePatience = sm.currentWavePatience;
+            var spawn = typeof(ShiftManager).GetMethod("TrySpawnNextOrder", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            spawn.Invoke(sm, null);
+            bool spawned = sm.activeOrders.Count == 1;
+            Assert(spawned, "Campaign order spawned for patience check");
+            if (spawned)
+            {
+                var o = sm.activeOrders[0];
+                float minExpected = ShiftManager.ApplyPatience(wavePatience);
+                Assert(o.initialPatience >= minExpected - 0.01f, $"Spawned order patience {o.initialPatience:F1}s >= 1.5x wave patience {minExpected:F1}s");
+                Assert(Mathf.Approximately(o.timeRemaining, o.initialPatience), "New order starts with full (longer) timer");
+            }
+            sm.activeOrders.Clear();
+            sm.shiftActive = false;
+        }
+
+        // =========================================================================
+        // TEST 29: Chef faces in the character picker
+        // =========================================================================
+        private void Test29_ChefPortraits()
+        {
+            Debug.Log("\n[TEST 29] Chef Portraits (character picker faces)");
+            var linh = ChefPortraits.Get("linh");
+            var jiwon = ChefPortraits.Get("jiwon");
+            Assert(linh != null, "Linh portrait loads");
+            Assert(jiwon != null, "Jiwon portrait loads");
+            if (linh != null) Assert(Mathf.Approximately(linh.rect.width, linh.rect.height), "Linh portrait is square (head + upper body crop)");
+            if (jiwon != null) Assert(Mathf.Approximately(jiwon.rect.width, jiwon.rect.height), "Jiwon portrait is square (head + upper body crop)");
+            Assert(linh != null && jiwon != null && linh != jiwon && linh.texture != jiwon.texture, "Linh and Jiwon portraits are different");
+            Assert(ChefPortraits.Get("linh") == linh, "Portrait is cached (same sprite on repeat call)");
+            Assert(ChefPortraits.Get(NetworkManager.PLACEHOLDER_CHAR) == null, "Unpicked chef has no portrait");
+            Assert(ChefPortraits.Get(null) == null, "Null chef id is safe");
+        }
+
+        // =========================================================================
+        // TEST 30: Bigger, clearer input feedback (Kenney CC0 FX) + stage unlock cheat
+        // =========================================================================
+        private void Test30_FxVisibilityAndCheat()
+        {
+            Debug.Log("\n[TEST 30] FX Visibility (sprite pack, size, life, icons) & Unlock Cheat");
+            FxType[] all = { FxType.Combine, FxType.CookDone, FxType.Serve, FxType.Pass, FxType.Error, FxType.Pickup };
+            foreach (var t in all)
+            {
+                var s = FeedbackFX.SpriteFor(t);
+                Assert(s != null && s.texture != null && s.texture.name.StartsWith("fx_"), $"{t} burst uses a real FX sprite from the pack (not the tiny dot)");
+            }
+            Assert(FeedbackFX.SpriteFor(FxType.Combine) == FeedbackFX.SpriteFor(FxType.Combine), "FX sprites are cached");
+            Assert(FeedbackFX.MIN_PARTICLE_SIZE >= 0.3f, $"Particles are big enough to see (min size {FeedbackFX.MIN_PARTICLE_SIZE} >= 0.3)");
+            Assert(FeedbackFX.MIN_PARTICLE_LIFE >= 0.7f, $"Particles stay long enough to see (min life {FeedbackFX.MIN_PARTICLE_LIFE}s >= 0.7)");
+            Assert(FeedbackFX.POP_MAX_SCALE >= 1.2f, "Centre pop ring grows big enough to notice");
+            Assert(FeedbackFX.IconFor(FxType.Serve) != null, "Serve shows a check mark");
+            Assert(FeedbackFX.IconFor(FxType.Combine) != null, "Combine shows a check mark");
+            Assert(FeedbackFX.IconFor(FxType.Error) != null && FeedbackFX.IconFor(FxType.Error) != FeedbackFX.IconFor(FxType.Serve), "Error shows a different (cross) icon");
+            Assert(FeedbackFX.IconFor(FxType.None) == null, "None has no icon");
+            Assert(FeedbackFX.MAX_PARTICLES_PER_BURST <= 12 && FeedbackFX.POOL_SIZE == 24, "Bigger FX keep the same small pool budget");
+
+            // FX draw on top of everything in the world (held items/station icons use up to ~1450).
+            Assert(FeedbackFX.SORT_ORDER >= 30000 && FeedbackFX.SORT_ORDER + 2 <= short.MaxValue, $"FX sorting order {FeedbackFX.SORT_ORDER} is above every world sprite and still valid");
+            Assert(FeedbackFX.CAMERA_PULL > 0f, "FX bursts are pulled toward the camera so 3D counters cannot hide them");
+            var fxTop = FeedbackFX.EnsureInstance();
+            Assert(fxTop.LowestSortingOrder() >= FeedbackFX.SORT_ORDER, $"Every pooled FX renderer uses the top sorting order (lowest {fxTop.LowestSortingOrder()})");
+
+            // Cheat code matcher (pure logic)
+            var cc = new CheatCode("UNLOCK");
+            bool fired = false;
+            foreach (char ch in "UNLOCK") fired = cc.Feed(ch);
+            Assert(fired, "Typing UNLOCK fires the cheat");
+            Assert(!cc.Feed('U'), "Cheat resets after firing");
+            cc = new CheatCode("UNLOCK");
+            foreach (char ch in "UNX") cc.Feed(ch);
+            fired = false;
+            foreach (char ch in "LOCK") fired = cc.Feed(ch);
+            Assert(!fired, "Wrong letter resets the cheat sequence");
+            fired = false;
+            foreach (char ch in "uunlock") fired = cc.Feed(ch);
+            Assert(fired, "Cheat is case-insensitive and recovers from a repeated first letter");
+
+            // Cheat effect: all 5 campaign stages unlocked
+            var pm = ProgressionManager.Instance;
+            int oldStage = pm.highestUnlockedStage;
+            pm.highestUnlockedStage = 1;
+            pm.CheatUnlockAllStages();
+            Assert(pm.highestUnlockedStage == ProgressionManager.CAMPAIGN_STAGES && ProgressionManager.CAMPAIGN_STAGES == 5, "Cheat unlocks up to stage 5");
+            bool allOpen = true;
+            for (int i = 1; i <= 5; i++) allOpen &= pm.IsLevelUnlocked(i);
+            Assert(allOpen, "All 5 stages are playable after the cheat");
+            pm.highestUnlockedStage = oldStage;
         }
     }
 }
