@@ -105,7 +105,9 @@ public class BuildScript
                         importer.textureType = TextureImporterType.Sprite;
                         changed = true;
                     }
-                    if (importer.spritePixelsPerUnit != 32)
+                    // FX sprites keep their own tuned PPU (64); forcing 32 doubles their size.
+                    bool isFx = assetPath.Contains("/Sprites/FX/");
+                    if (!isFx && importer.spritePixelsPerUnit != 32)
                     {
                         importer.spritePixelsPerUnit = 32;
                         changed = true;
@@ -143,7 +145,7 @@ public class BuildScript
 
         PlayerSettings.productName = "Two Ladles";
         PlayerSettings.companyName = "Two Ladles Team";
-        PlayerSettings.bundleVersion = "1.0";
+        PlayerSettings.bundleVersion = "1.1";
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
 
         BuildPlayerOptions buildPlayerOptions = new BuildPlayerOptions();
@@ -180,11 +182,11 @@ public class BuildScript
 
         PlayerSettings.productName = "Two Ladles";
         PlayerSettings.companyName = "Two Ladles Team";
-        PlayerSettings.bundleVersion = "1.0";
+        PlayerSettings.bundleVersion = "1.1";
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
         PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
         PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel34;
-        PlayerSettings.Android.bundleVersionCode = 153;
+        PlayerSettings.Android.bundleVersionCode = 154;
         PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
 
