@@ -1,9 +1,9 @@
 # Two Ladles: Full Project Report
 
 **Game:** *Two Ladles: A Vietnam–Korea Kitchen Story*. It is a co-op cooking game for 2 players, built for **Korea Game Week 2026 (KGW2026)**.
-**Current version:** **v1.4.10** (Android build code 150). It is live at https://madlyham.github.io/two-ladles/
+**Current version:** **v1.4.10** (Android build code 150). It is live at https://madlyham.github.io/Two-Ladles-KGW2026/
 **Engine:** Unity 2022.3.62f3, written in C#. Godot was used for the early prototype; it is now archived on the `godot` branch.
-**Repository:** `two-ladles`, branch `main`. There are 67 commits from 2026-11-06 to 2026-11-11. The latest is `5be2a06`.
+**Repository:** `Two-Ladles-KGW2026` (renamed from `two-ladles`), branch `main`. There are 67 commits from 2026-11-06 to 2026-11-11. The latest is `5be2a06`.
 
 ---
 
